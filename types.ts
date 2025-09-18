@@ -110,3 +110,11 @@ export interface OrderItemWithMenuItem {
     name: string;
   } | null;
 }
+
+export interface LedgerEntry {
+  date: string;
+  description: string;
+  debit: number;
+  credit: number;
+  balance: number;
+}
