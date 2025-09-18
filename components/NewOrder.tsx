@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useCallback } from 'react';
 import { supabase } from '../supabaseClient';
 import { Customer, MenuItem, OrderItemForm } from '../types';
@@ -8,7 +9,7 @@ const NewOrder: React.FC = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
   const [isAddingNewCustomer, setIsAddingNewCustomer] = useState(false);
-  const [newCustomer, setNewCustomer] = useState({ name: '', phone: '', address: '' });
+  const [newCustomer, setNewCustomer] = useState({ name: '', phone: '' });
   const [orderItems, setOrderItems] = useState<OrderItemForm[]>([{ item_id: null, custom_item_name: '', quantity: 1, unit_price: 0 }]);
   
   const [orderType, setOrderType] = useState<'Online' | 'Local'>('Local');
@@ -103,7 +104,7 @@ const NewOrder: React.FC = () => {
     setSearchTerm('');
     setSelectedCustomer(null);
     setIsAddingNewCustomer(false);
-    setNewCustomer({ name: '', phone: '', address: '' });
+    setNewCustomer({ name: '', phone: '' });
     setOrderItems([{ item_id: null, custom_item_name: '', quantity: 1, unit_price: 0 }]);
     setOrderType('Local');
     setDeliveryDate(new Date().toISOString().split('T')[0]);
@@ -162,7 +163,7 @@ const NewOrder: React.FC = () => {
       
       const { data: newCustomerData, error: customerError } = await supabase
         .from('customers')
-        .insert({ name: newCustomer.name, phone: newCustomer.phone, address: newCustomer.address })
+        .insert({ name: newCustomer.name, phone: newCustomer.phone })
         .select()
         .single();
       if (customerError) {
@@ -281,7 +282,7 @@ const NewOrder: React.FC = () => {
               </div>
             </div>
             {isAddingNewCustomer && (
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mt-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mt-4">
                  <div>
                     <label className="text-lg font-medium text-slate-600">Name</label>
                     <input type="text" value={newCustomer.name} onChange={(e) => setNewCustomer({...newCustomer, name: e.target.value})} className="w-full p-3 text-lg border-gray-300 rounded-md shadow-sm bg-slate-50" required />
@@ -289,10 +290,6 @@ const NewOrder: React.FC = () => {
                 <div>
                     <label className="text-lg font-medium text-slate-600">Phone</label>
                     <input type="text" value={newCustomer.phone} onChange={(e) => setNewCustomer({...newCustomer, phone: e.target.value})} className="w-full p-3 text-lg border-gray-300 rounded-md shadow-sm bg-slate-50" required />
-                </div>
-                <div>
-                    <label className="text-lg font-medium text-slate-600">Address</label>
-                    <input type="text" value={newCustomer.address} onChange={(e) => setNewCustomer({...newCustomer, address: e.target.value})} className="w-full p-3 text-lg border-gray-300 rounded-md shadow-sm bg-slate-50" />
                 </div>
               </div>
             )}

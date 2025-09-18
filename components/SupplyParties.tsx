@@ -86,8 +86,9 @@ const SupplyParties: React.FC = () => {
          if (namesError) {
             console.error('Error fetching party names:', namesError.message);
         } else if (namesData) {
-            // FIX: Explicitly cast party_name to string to resolve a TypeScript type inference issue where it was treated as 'unknown'.
-            const uniqueNames = [...new Set(namesData.map(p => p.party_name as string))];
+            // FIX: The `party_name` property was being inferred as `unknown`. By typing the parameter `p` in the map function,
+            // we provide TypeScript with the correct type information, ensuring `uniqueNames` is a `string[]`.
+            const uniqueNames = [...new Set(namesData.map((p: { party_name: string }) => p.party_name))];
             setPartyNames(uniqueNames);
         }
         
