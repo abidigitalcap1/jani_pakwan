@@ -20,7 +20,7 @@ const CustomerHistory: React.FC = () => {
       query = query.or(`name.ilike.%${searchTerm}%,phone.ilike.%${searchTerm}%`);
     }
 
-    const { data, error } = await query.order('last_order_date', { ascending: false, nullsFirst: true });
+    const { data, error } = await query.order('last_order_date', { ascending: false, nullsFirst: false });
 
     if (error) {
       console.error('Error fetching customer history:', error.message);
@@ -58,22 +58,38 @@ const CustomerHistory: React.FC = () => {
       setIsModalOpen(true);
   };
   
-  const fetchOrderItems = async (orderId: number) => {
-    if (orderItems[orderId]) { // Don't re-fetch if already loaded
-        setExpandedOrderId(expandedOrderId === orderId ? null : orderId);
-        return;
+  const toggleOrderDetails = (orderId: number) => {
+    const isCurrentlyExpanded = expandedOrderId === orderId;
+    setExpandedOrderId(isCurrentlyExpanded ? null : orderId);
+    
+    // Fetch items only if they are not already loaded and we are expanding
+    if (!isCurrentlyExpanded && !orderItems[orderId]) {
+        fetchOrderItems(orderId);
     }
+  };
 
+  const fetchOrderItems = async (orderId: number) => {
+    // FIX: Switched to an explicit select statement to avoid potential issues with '*' and improve query clarity.
+    // This ensures that only the required fields are fetched, making the component more resilient to schema changes.
     const { data, error } = await supabase
         .from('order_items')
-        .select(`*, menu_items (name)`)
+        .select(`
+            order_item_id,
+            quantity,
+            unit_price,
+            custom_item_name,
+            menu_items (
+                name
+            )
+        `)
         .eq('order_id', orderId);
     
     if (error) {
         console.error('Error fetching order items:', error.message);
+        // Also set the items for this orderId to an empty array on error to unblock the UI
+        setOrderItems(prev => ({ ...prev, [orderId]: [] }));
     } else {
         setOrderItems(prev => ({ ...prev, [orderId]: data as OrderItemWithMenuItem[] }));
-        setExpandedOrderId(orderId);
     }
   };
 
@@ -142,9 +158,8 @@ const CustomerHistory: React.FC = () => {
                                <tbody>
                                    {customerOrders.map(order => (
                                        <React.Fragment key={order.order_id}>
-                                           <tr className="border-b cursor-pointer hover:bg-slate-100" onClick={() => fetchOrderItems(order.order_id)}>
+                                           <tr className="border-b cursor-pointer hover:bg-slate-100" onClick={() => toggleOrderDetails(order.order_id)}>
                                                 <td className="py-2 px-3 font-medium">#{order.order_id}</td>
-                                                {/* FIX: Changed 'order.order_date' to 'order.delivery_date' to match the 'OrderWithCustomer' type definition. */}
                                                 <td className="py-2 px-3">{new Date(order.delivery_date).toLocaleDateString()}</td>
                                                 <td className="py-2 px-3">PKR {order.total_amount.toLocaleString()}</td>
                                                 <td className="py-2 px-3 font-semibold text-red-500">PKR {order.remaining_amount.toLocaleString()}</td>
@@ -153,16 +168,43 @@ const CustomerHistory: React.FC = () => {
                                            {expandedOrderId === order.order_id && (
                                                <tr>
                                                    <td colSpan={5} className="p-4 bg-slate-50">
-                                                        <h4 className="font-bold mb-2 text-slate-600">Order Items:</h4>
-                                                        {orderItems[order.order_id] && orderItems[order.order_id].length > 0 ? (
-                                                            <ul className="list-disc pl-5">
-                                                                {orderItems[order.order_id].map(item => (
-                                                                    <li key={item.order_item_id}>
-                                                                        {item.quantity} x {item.menu_items?.name || item.custom_item_name} @ PKR {item.unit_price.toLocaleString()}
-                                                                    </li>
-                                                                ))}
-                                                            </ul>
-                                                        ) : <p>No items found for this order.</p>}
+                                                        <h4 className="font-bold mb-2 text-slate-600">Order Details:</h4>
+                                                        {orderItems[order.order_id] ? (
+                                                            orderItems[order.order_id].length > 0 ? (
+                                                                <div className="overflow-x-auto">
+                                                                    <table className="min-w-full text-sm mb-4">
+                                                                        <thead className="bg-slate-200">
+                                                                            <tr>
+                                                                                <th className="py-2 px-3 text-left font-semibold text-slate-700">Item</th>
+                                                                                <th className="py-2 px-3 text-center font-semibold text-slate-700">Quantity</th>
+                                                                                <th className="py-2 px-3 text-right font-semibold text-slate-700">Unit Price</th>
+                                                                                <th className="py-2 px-3 text-right font-semibold text-slate-700">Subtotal</th>
+                                                                            </tr>
+                                                                        </thead>
+                                                                        <tbody>
+                                                                            {orderItems[order.order_id].map(item => (
+                                                                                <tr key={item.order_item_id} className="border-b border-slate-200">
+                                                                                    <td className="py-2 px-3">{item.menu_items?.name || item.custom_item_name}</td>
+                                                                                    <td className="py-2 px-3 text-center">{item.quantity}</td>
+                                                                                    <td className="py-2 px-3 text-right">PKR {item.unit_price.toLocaleString()}</td>
+                                                                                    <td className="py-2 px-3 text-right font-medium">PKR {(item.quantity * item.unit_price).toLocaleString()}</td>
+                                                                                </tr>
+                                                                            ))}
+                                                                        </tbody>
+                                                                    </table>
+                                                                </div>
+                                                            ) : <p>No items found for this order.</p>
+                                                        ) : <p>Loading items...</p>}
+                                                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
+                                                            <div>
+                                                                <strong className="text-slate-600">Delivery Address:</strong>
+                                                                <p className="text-slate-800 whitespace-pre-wrap">{order.delivery_address || 'N/A'}</p>
+                                                            </div>
+                                                            <div>
+                                                                <strong className="text-slate-600">Notes:</strong>
+                                                                <p className="text-slate-800 whitespace-pre-wrap">{order.notes || 'No notes provided.'}</p>
+                                                            </div>
+                                                        </div>
                                                    </td>
                                                </tr>
                                            )}

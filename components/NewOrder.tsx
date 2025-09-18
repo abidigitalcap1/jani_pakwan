@@ -141,6 +141,25 @@ const NewOrder: React.FC = () => {
 
     // Create new customer if needed
     if (isAddingNewCustomer) {
+      // First, check if a customer with this phone number already exists to avoid unique constraint violation.
+      const { data: existingCustomer, error: phoneCheckError } = await supabase
+        .from('customers')
+        .select('name')
+        .eq('phone', newCustomer.phone)
+        .maybeSingle();
+
+      if (phoneCheckError) {
+        setError(`Error during customer check: ${phoneCheckError.message}`);
+        setLoading(false);
+        return;
+      }
+
+      if (existingCustomer) {
+        setError(`A customer with phone ${newCustomer.phone} already exists: ${existingCustomer.name}. Please search for them instead.`);
+        setLoading(false);
+        return;
+      }
+      
       const { data: newCustomerData, error: customerError } = await supabase
         .from('customers')
         .insert({ name: newCustomer.name, phone: newCustomer.phone, address: newCustomer.address })
