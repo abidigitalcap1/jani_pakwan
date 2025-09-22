@@ -1,5 +1,4 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { supabase } from '../supabaseClient';
 import { SupplyParty, PartyPayment, Party, LedgerEntry } from '../types';
 
 // Modal for adding a new supply bill for either a new or existing party
@@ -73,26 +72,25 @@ const SupplyParties: React.FC = () => {
 
     const fetchPartiesAndNames = useCallback(async () => {
         setLoading(true);
-        // Fetch aggregated data for display
-        const { data: aggregatedData, error: rpcError } = await supabase.rpc('get_supply_parties');
-        if (rpcError) {
-            console.error('Error fetching supply parties:', rpcError.message);
-        } else {
-            setParties(aggregatedData || []);
-        }
+        try {
+            const [partiesRes, namesRes] = await Promise.all([
+                fetch('/api.php?action=getSupplyParties'),
+                fetch('/api.php?action=getPartyNames'),
+            ]);
+            const partiesData = await partiesRes.json();
+            const namesData = await namesRes.json();
 
-        // Fetch unique names for the modal's datalist
-        const { data: namesData, error: namesError } = await supabase.from('parties').select('party_name');
-         if (namesError) {
-            console.error('Error fetching party names:', namesError.message);
-        } else if (namesData) {
-            // FIX: The `party_name` property was being inferred as `unknown`. By typing the parameter `p` in the map function,
-            // we provide TypeScript with the correct type information, ensuring `uniqueNames` is a `string[]`.
-            const uniqueNames = [...new Set(namesData.map((p: { party_name: string }) => p.party_name))];
-            setPartyNames(uniqueNames);
+            if (!partiesRes.ok) throw new Error(partiesData.error || 'Failed to fetch parties');
+            if (!namesRes.ok) throw new Error(namesData.error || 'Failed to fetch names');
+            
+            setParties(partiesData);
+            setPartyNames(namesData);
+
+        } catch (err: any) {
+            console.error('Error fetching supply party data:', err.message);
+        } finally {
+            setLoading(false);
         }
-        
-        setLoading(false);
     }, []);
 
     useEffect(() => {
@@ -101,14 +99,22 @@ const SupplyParties: React.FC = () => {
 
     const handleSaveSupplyBill = async (party: any) => {
         setLoading(true);
-        const { error } = await supabase.from('parties').insert(party);
-        if (error) {
-             console.error('Error saving party:', error.message);
-        } else {
+        try {
+            const response = await fetch('/api.php?action=addSupplyBill', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(party)
+            });
+            const data = await response.json();
+            if (!response.ok) throw new Error(data.error);
+
             setIsModalOpen(false);
             fetchPartiesAndNames();
+        } catch (err: any) {
+            console.error('Error saving party:', err.message);
+        } finally {
+            setLoading(false);
         }
-        setLoading(false);
     };
     
     const openPaymentModal = async (party: SupplyParty) => {
@@ -117,55 +123,50 @@ const SupplyParties: React.FC = () => {
         setError(null);
         setSuccess(null);
 
-        const { data: allSupplies, error: suppliesError } = await supabase.from('parties').select('*').eq('party_name', party.party_name);
-        if (suppliesError) {
-            console.error("Error fetching supplies for ledger:", suppliesError.message);
+        try {
+            const response = await fetch(`/api.php?action=getPartyLedger&partyName=${encodeURIComponent(party.party_name)}`);
+            const data = await response.json();
+            if (!response.ok) throw new Error(data.error);
+            const { supplies, payments } = data;
+
+            const combinedTransactions: any[] = [
+                ...supplies.map((s: Party) => ({ type: 'debit', date: s.supply_date, data: s })),
+                ...payments.map((p: PartyPayment) => ({ type: 'credit', date: p.payment_date, data: p }))
+            ];
+            
+            combinedTransactions.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+
+            let balance = 0;
+            const entries: LedgerEntry[] = combinedTransactions.map(item => {
+                if (item.type === 'debit') {
+                    balance += Number(item.data.total_amount);
+                    return {
+                        date: item.data.supply_date,
+                        description: `Supply #${item.data.id} - ${item.data.details || 'Goods/Services'}`,
+                        debit: Number(item.data.total_amount),
+                        credit: 0,
+                        balance: balance,
+                    };
+                } else { // credit
+                    const payment = item.data;
+                    balance -= Number(payment.amount_paid);
+                    return {
+                        date: payment.payment_date,
+                        description: `Payment - ${payment.note || `Towards Invoice #${payment.party_id}`}`,
+                        debit: 0,
+                        credit: Number(payment.amount_paid),
+                        balance: balance,
+                    };
+                }
+            });
+            
+            setLedgerEntries(entries);
+            setIsPaymentModalOpen(true);
+        } catch (err: any) {
+            console.error('Error fetching ledger:', err.message);
+        } finally {
             setLoading(false);
-            return;
         }
-
-        const supplyIds = allSupplies.map(s => s.id);
-        const { data: allPayments, error: paymentsError } = await supabase.from('party_payments').select('*').in('party_id', supplyIds);
-        if (paymentsError) {
-             console.error("Error fetching payments for ledger:", paymentsError.message);
-             setLoading(false);
-             return;
-        }
-
-        const combinedTransactions = [
-            ...(allSupplies || []).map(s => ({ type: 'debit', date: s.supply_date, data: s as Party })),
-            ...(allPayments || []).map(p => ({ type: 'credit', date: p.payment_date, data: p as PartyPayment }))
-        ];
-
-        combinedTransactions.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
-
-        let balance = 0;
-        const entries: LedgerEntry[] = combinedTransactions.map(item => {
-            if (item.type === 'debit') {
-                balance += item.data.total_amount;
-                return {
-                    date: item.data.supply_date,
-                    description: `Supply #${item.data.id} - ${item.data.details || 'Goods/Services'}`,
-                    debit: item.data.total_amount,
-                    credit: 0,
-                    balance: balance,
-                };
-            } else { // credit
-                const payment = item.data as PartyPayment;
-                balance -= payment.amount_paid;
-                return {
-                    date: payment.payment_date,
-                    description: `Payment - ${payment.note || `Towards Invoice #${payment.party_id}`}`,
-                    debit: 0,
-                    credit: payment.amount_paid,
-                    balance: balance,
-                };
-            }
-        });
-        
-        setLedgerEntries(entries);
-        setLoading(false);
-        setIsPaymentModalOpen(true);
     };
 
 
@@ -182,47 +183,34 @@ const SupplyParties: React.FC = () => {
         setError(null);
         setSuccess(null);
     
-        let dbOperation;
-    
-        if (transactionType === 'Payment') {
-            const remainingCents = Math.round(selectedParty.pending_amount * 100);
-            const paymentCents = Math.round(transactionAmount * 100);
-    
-            if (paymentCents > remainingCents) {
-                setError(`Payment cannot exceed pending amount of PKR ${selectedParty.pending_amount}.`);
-                setLoading(false);
-                return;
-            }
-    
-            dbOperation = supabase.from('party_payments').insert({
-                party_id: selectedParty.id, 
-                amount_paid: transactionAmount,
-                note: transactionNote || 'Payment',
-                payment_date: new Date().toISOString()
-            });
-        } else { // 'Charge'
-            dbOperation = supabase.from('parties').insert({
+        try {
+            const payload = {
+                type: transactionType,
                 party_name: selectedParty.party_name,
-                supply_date: new Date().toISOString(),
-                total_amount: transactionAmount,
-                details: transactionNote || 'Additional Charge'
+                party_id: selectedParty.id,
+                amount: transactionAmount,
+                note: transactionNote
+            };
+            
+            const response = await fetch('/api.php?action=addPartyTransaction', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
             });
-        }
-    
-        const { error: insertError } = await dbOperation;
-    
-        if (insertError) {
-            setError(`Error adding transaction: ${insertError.message}`);
-        } else {
+            const data = await response.json();
+            if (!response.ok) throw new Error(data.error);
+
             setSuccess('Transaction added successfully!');
             setNewTransactionAmount('');
             setTransactionNote('');
             setTransactionType('Payment');
             
-            const { data: refreshedParties } = await supabase.rpc('get_supply_parties');
+            // Refresh data
+            const partiesRes = await fetch('/api.php?action=getSupplyParties');
+            const refreshedParties = await partiesRes.json();
             if (refreshedParties) {
                 setParties(refreshedParties);
-                const partyForModal = refreshedParties.find(p => p.party_name === selectedParty.party_name);
+                const partyForModal = refreshedParties.find((p: SupplyParty) => p.party_name === selectedParty.party_name);
                 if (partyForModal) {
                     await openPaymentModal(partyForModal);
                 } else {
@@ -232,8 +220,12 @@ const SupplyParties: React.FC = () => {
             } else {
                  await fetchPartiesAndNames();
             }
+
+        } catch (err: any) {
+            setError(`Error adding transaction: ${err.message}`);
+        } finally {
+            setLoading(false);
         }
-        setLoading(false);
     };
 
     return (
@@ -264,9 +256,9 @@ const SupplyParties: React.FC = () => {
                                 <tr key={party.id} className="border-b hover:bg-slate-50">
                                     <td className="py-3 px-4">{new Date(party.supply_date).toLocaleDateString()}</td>
                                     <td className="py-3 px-4">{party.party_name}</td>
-                                    <td className="py-3 px-4 text-right font-medium">PKR {party.total_amount.toLocaleString()}</td>
-                                    <td className="py-3 px-4 text-right text-green-600">PKR {party.amount_paid.toLocaleString()}</td>
-                                    <td className="py-3 px-4 text-right text-red-600">PKR {party.pending_amount.toLocaleString()}</td>
+                                    <td className="py-3 px-4 text-right font-medium">PKR {Number(party.total_amount).toLocaleString()}</td>
+                                    <td className="py-3 px-4 text-right text-green-600">PKR {Number(party.amount_paid).toLocaleString()}</td>
+                                    <td className="py-3 px-4 text-right text-red-600">PKR {Number(party.pending_amount).toLocaleString()}</td>
                                     <td className="py-3 px-4 text-center">
                                         <button onClick={() => openPaymentModal(party)} className="px-3 py-2 bg-teal-500 text-white rounded-md hover:bg-teal-600 text-sm">View Ledger / Pay</button>
                                     </td>
@@ -332,7 +324,7 @@ const SupplyParties: React.FC = () => {
                                         <label className="block font-medium text-slate-600">Note (optional)</label>
                                         <textarea value={transactionNote} onChange={e => setTransactionNote(e.target.value)} rows={2} className="w-full p-2 border-gray-300 rounded-md bg-slate-50"></textarea>
                                     </div>
-                                    <button type="submit" disabled={loading || (transactionType === 'Payment' && selectedParty.pending_amount === 0)} className="w-full py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 disabled:bg-indigo-400 disabled:cursor-not-allowed">{loading ? 'Saving...' : 'Add Transaction'}</button>
+                                    <button type="submit" disabled={loading || (transactionType === 'Payment' && Number(selectedParty.pending_amount) === 0)} className="w-full py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 disabled:bg-indigo-400 disabled:cursor-not-allowed">{loading ? 'Saving...' : 'Add Transaction'}</button>
                                 </form>
                             </div>
                          </div>

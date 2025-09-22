@@ -1,5 +1,4 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { supabase } from '../supabaseClient';
 import { Expense } from '../types';
 
 const Expenses: React.FC = () => {
@@ -14,19 +13,17 @@ const Expenses: React.FC = () => {
 
   const fetchExpenses = useCallback(async () => {
     setLoading(true);
-    const { data, error } = await supabase
-      .from('expenses')
-      .select('*')
-      .order('expense_date', { ascending: false })
-      .order('expense_id', { ascending: false }); // Secondary sort for same-day entries
-
-    if (error) {
-      console.error('Error fetching expenses:', error.message);
-      setError('Failed to fetch expenses.');
-    } else {
+    try {
+      const response = await fetch('/api.php?action=getExpenses');
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error);
       setExpenses(data);
+    } catch (err: any) {
+      console.error('Error fetching expenses:', err.message);
+      setError('Failed to fetch expenses.');
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   }, []);
 
   useEffect(() => {
@@ -44,24 +41,29 @@ const Expenses: React.FC = () => {
     setError(null);
     setSuccess(null);
 
-    const { error: insertError } = await supabase
-      .from('expenses')
-      .insert([{ description, amount, category, expense_date: expenseDate }]);
+    try {
+        const response = await fetch('/api.php?action=addExpense', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ description, amount, category, expense_date: expenseDate })
+        });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error);
 
-    if (insertError) {
-      setError(`Failed to add expense: ${insertError.message}`);
-    } else {
-      setSuccess('Expense added successfully!');
-      setDescription('');
-      setAmount('');
-      setCategory('Ingredients');
-      setExpenseDate(new Date().toISOString().split('T')[0]);
-      fetchExpenses(); // Refresh the list
+        setSuccess('Expense added successfully!');
+        setDescription('');
+        setAmount('');
+        setCategory('Ingredients');
+        setExpenseDate(new Date().toISOString().split('T')[0]);
+        fetchExpenses(); // Refresh the list
+    } catch(err: any) {
+        setError(`Failed to add expense: ${err.message}`);
+    } finally {
+        setLoading(false);
     }
-    setLoading(false);
   };
 
-  const totalExpenses = expenses.reduce((sum, exp) => sum + exp.amount, 0);
+  const totalExpenses = expenses.reduce((sum, exp) => sum + Number(exp.amount), 0);
 
   return (
     <div className="p-4 md:p-8 space-y-8">
@@ -153,7 +155,7 @@ const Expenses: React.FC = () => {
                     <td className="py-3 px-4">{new Date(expense.expense_date).toLocaleDateString()}</td>
                     <td className="py-3 px-4">{expense.description}</td>
                     <td className="py-3 px-4">{expense.category}</td>
-                    <td className="py-3 px-4 text-right font-medium">PKR {expense.amount.toLocaleString()}</td>
+                    <td className="py-3 px-4 text-right font-medium">PKR {Number(expense.amount).toLocaleString()}</td>
                   </tr>
                 ))
               )}

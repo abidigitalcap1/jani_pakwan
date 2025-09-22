@@ -1,9 +1,8 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { supabase } from '../supabaseClient';
-import { Customer, OrderWithCustomer, OrderItemWithMenuItem } from '../types';
+import { Customer, OrderWithCustomer, OrderItemWithMenuItem, CustomerHistoryEntry } from '../types';
 
 const CustomerHistory: React.FC = () => {
-  const [customers, setCustomers] = useState<any[]>([]);
+  const [customers, setCustomers] = useState<CustomerHistoryEntry[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [loading, setLoading] = useState(true);
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
@@ -14,20 +13,16 @@ const CustomerHistory: React.FC = () => {
 
   const fetchCustomerHistory = useCallback(async () => {
     setLoading(true);
-    let query = supabase.from('customer_history').select('*');
-
-    if (searchTerm) {
-      query = query.or(`name.ilike.%${searchTerm}%,phone.ilike.%${searchTerm}%`);
+    try {
+        const response = await fetch(`/api.php?action=getCustomerHistory&search=${encodeURIComponent(searchTerm)}`);
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error);
+        setCustomers(data);
+    } catch (err: any) {
+        console.error('Error fetching customer history:', err.message);
+    } finally {
+        setLoading(false);
     }
-
-    const { data, error } = await query.order('last_order_date', { ascending: false, nullsFirst: false });
-
-    if (error) {
-      console.error('Error fetching customer history:', error.message);
-    } else {
-      setCustomers(data || []);
-    }
-    setLoading(false);
   }, [searchTerm]);
 
   useEffect(() => {
@@ -39,20 +34,17 @@ const CustomerHistory: React.FC = () => {
   }, [searchTerm, fetchCustomerHistory]);
   
   const fetchCustomerOrders = async (customerId: number) => {
-      const { data, error } = await supabase
-        .from('orders')
-        .select(`*, customers (name)`)
-        .eq('customer_id', customerId)
-        .order('delivery_date', { ascending: false });
-
-      if (error) {
-          console.error('Error fetching customer orders:', error);
-      } else {
-          setCustomerOrders(data as OrderWithCustomer[]);
+      try {
+          const response = await fetch(`/api.php?action=getCustomerOrders&customerId=${customerId}`);
+          const data = await response.json();
+          if (!response.ok) throw new Error(data.error);
+          setCustomerOrders(data);
+      } catch (err: any) {
+          console.error('Error fetching customer orders:', err.message);
       }
   };
   
-  const handleViewOrders = (customer: Customer) => {
+  const handleViewOrders = (customer: CustomerHistoryEntry) => {
       setSelectedCustomer(customer);
       fetchCustomerOrders(customer.customer_id);
       setIsModalOpen(true);
@@ -62,34 +54,20 @@ const CustomerHistory: React.FC = () => {
     const isCurrentlyExpanded = expandedOrderId === orderId;
     setExpandedOrderId(isCurrentlyExpanded ? null : orderId);
     
-    // Fetch items only if they are not already loaded and we are expanding
     if (!isCurrentlyExpanded && !orderItems[orderId]) {
         fetchOrderItems(orderId);
     }
   };
 
   const fetchOrderItems = async (orderId: number) => {
-    // FIX: Switched to an explicit select statement to avoid potential issues with '*' and improve query clarity.
-    // This ensures that only the required fields are fetched, making the component more resilient to schema changes.
-    const { data, error } = await supabase
-        .from('order_items')
-        .select(`
-            order_item_id,
-            quantity,
-            unit_price,
-            custom_item_name,
-            menu_items (
-                name
-            )
-        `)
-        .eq('order_id', orderId);
-    
-    if (error) {
-        console.error('Error fetching order items:', error.message);
-        // Also set the items for this orderId to an empty array on error to unblock the UI
+    try {
+        const response = await fetch(`/api.php?action=getOrderItems&orderId=${orderId}`);
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error);
+        setOrderItems(prev => ({ ...prev, [orderId]: data }));
+    } catch (err: any) {
+        console.error('Error fetching order items:', err.message);
         setOrderItems(prev => ({ ...prev, [orderId]: [] }));
-    } else {
-        setOrderItems(prev => ({ ...prev, [orderId]: data as OrderItemWithMenuItem[] }));
     }
   };
 
@@ -161,8 +139,8 @@ const CustomerHistory: React.FC = () => {
                                            <tr className="border-b cursor-pointer hover:bg-slate-100" onClick={() => toggleOrderDetails(order.order_id)}>
                                                 <td className="py-2 px-3 font-medium">#{order.order_id}</td>
                                                 <td className="py-2 px-3">{new Date(order.delivery_date).toLocaleDateString()}</td>
-                                                <td className="py-2 px-3">PKR {order.total_amount.toLocaleString()}</td>
-                                                <td className="py-2 px-3 font-semibold text-red-500">PKR {order.remaining_amount.toLocaleString()}</td>
+                                                <td className="py-2 px-3">PKR {Number(order.total_amount).toLocaleString()}</td>
+                                                <td className="py-2 px-3 font-semibold text-red-500">PKR {Number(order.remaining_amount).toLocaleString()}</td>
                                                 <td className="py-2 px-3"><span className={`px-2 py-1 text-xs font-semibold rounded-full ${order.status === 'Fulfilled' ? 'bg-green-100 text-green-800' : 'bg-yellow-100 text-yellow-800'}`}>{order.status}</span></td>
                                            </tr>
                                            {expandedOrderId === order.order_id && (
@@ -184,10 +162,10 @@ const CustomerHistory: React.FC = () => {
                                                                         <tbody>
                                                                             {orderItems[order.order_id].map(item => (
                                                                                 <tr key={item.order_item_id} className="border-b border-slate-200">
-                                                                                    <td className="py-2 px-3">{item.menu_items?.name || item.custom_item_name}</td>
+                                                                                    <td className="py-2 px-3">{item.menu_item_name || item.custom_item_name}</td>
                                                                                     <td className="py-2 px-3 text-center">{item.quantity}</td>
-                                                                                    <td className="py-2 px-3 text-right">PKR {item.unit_price.toLocaleString()}</td>
-                                                                                    <td className="py-2 px-3 text-right font-medium">PKR {(item.quantity * item.unit_price).toLocaleString()}</td>
+                                                                                    <td className="py-2 px-3 text-right">PKR {Number(item.unit_price).toLocaleString()}</td>
+                                                                                    <td className="py-2 px-3 text-right font-medium">PKR {(item.quantity * Number(item.unit_price)).toLocaleString()}</td>
                                                                                 </tr>
                                                                             ))}
                                                                         </tbody>

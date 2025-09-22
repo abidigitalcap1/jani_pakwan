@@ -23,6 +23,17 @@ export interface Customer {
   address: string;
 }
 
+export interface CustomerHistoryEntry {
+  customer_id: number;
+  name: string;
+  phone: string;
+  address: string;
+  total_orders: number;
+  total_spent: number;
+  total_pending: number;
+  last_order_date: string;
+}
+
 export interface MenuItem {
   item_id: number;
   name: string;
@@ -40,7 +51,6 @@ export interface Order {
   order_id: number;
   customer_id: number;
   order_type: 'Online' | 'Local';
-  // FIX: Added 'order_date' to align the type with database queries and resolve an error in CustomerHistory.tsx.
   order_date: string;
   delivery_date: string;
   delivery_time?: string;
@@ -50,8 +60,6 @@ export interface Order {
   delivery_address?: string;
   notes?: string;
   status: 'Pending' | 'Partially_Paid' | 'Fulfilled';
-  // FIX: Removed 'customers' property to resolve inheritance conflict in 'OrderWithCustomer'.
-  // This property is specific to joined queries and is now correctly defined only in the derived interface.
 }
 
 export interface Payment {
@@ -96,9 +104,7 @@ export interface SupplyParty {
 }
 
 export interface OrderWithCustomer extends Order {
-  customers: {
-    name: string;
-  } | null;
+  customer_name: string;
 }
 
 export interface OrderItemWithMenuItem {
@@ -106,9 +112,7 @@ export interface OrderItemWithMenuItem {
   quantity: number;
   unit_price: number;
   custom_item_name: string | null;
-  menu_items: {
-    name: string;
-  } | null;
+  menu_item_name: string | null;
 }
 
 export interface LedgerEntry {

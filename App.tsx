@@ -1,5 +1,5 @@
+
 import React, { useState, useEffect } from 'react';
-import { Session } from '@supabase/supabase-js';
 import Header from './components/Header';
 import Footer from './components/Footer';
 import Dashboard from './components/Dashboard';
@@ -10,7 +10,6 @@ import Expenses from './components/Expenses';
 import Income from './components/Income';
 import SupplyParties from './components/SupplyParties';
 import { Page } from './types';
-import { supabase } from './supabaseClient';
 
 // Placeholder components for other pages
 const Placeholder = ({ pageName }: { pageName: string }) => (
@@ -23,27 +22,37 @@ const Placeholder = ({ pageName }: { pageName: string }) => (
 );
 
 const App: React.FC = () => {
-  const [session, setSession] = useState<Session | null>(null);
+  // Session is now just a boolean indicating if the user is logged in
+  const [isLoggedIn, setIsLoggedIn] = useState<boolean | null>(null);
   const [activePage, setActivePage] = useState<Page>('DASHBOARD');
 
   useEffect(() => {
-    // Check for an active session when the app loads
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setSession(session);
-    });
-
-    // Listen for changes in authentication state (login/logout)
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      setSession(session);
-    });
-
-    // Clean up the subscription when the component unmounts
-    return () => subscription.unsubscribe();
+    // Check session with our backend on initial load
+    const checkSession = async () => {
+      try {
+        const response = await fetch('/api.php?action=getSession');
+        const data = await response.json();
+        if (response.ok && data.session) {
+          setIsLoggedIn(true);
+        } else {
+          setIsLoggedIn(false);
+        }
+      } catch (error) {
+        console.error("Failed to check session:", error);
+        setIsLoggedIn(false);
+      }
+    };
+    checkSession();
   }, []);
 
+  const handleLoginSuccess = () => {
+    setIsLoggedIn(true);
+    setActivePage('DASHBOARD');
+  };
 
   const handleLogout = async () => {
-    await supabase.auth.signOut();
+    await fetch('/api.php?action=logout');
+    setIsLoggedIn(false);
     setActivePage('DASHBOARD');
   };
   
@@ -72,12 +81,17 @@ const App: React.FC = () => {
     }
   };
 
-  // If there is no active session, show the Login component
-  if (!session) {
-    return <Login />;
+  // Show a loading state while checking session
+  if (isLoggedIn === null) {
+    return <div className="flex items-center justify-center min-h-screen">Loading...</div>;
   }
 
-  // If there is a session, show the main application
+  // If not logged in, show the Login component
+  if (!isLoggedIn) {
+    return <Login onLoginSuccess={handleLoginSuccess} />;
+  }
+
+  // If logged in, show the main application
   return (
     <div className="flex flex-col min-h-screen">
       <Header onNavigate={handleNavigation} onLogout={handleLogout} />
